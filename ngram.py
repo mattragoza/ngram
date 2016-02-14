@@ -13,6 +13,8 @@ class NGramModel:
     @staticmethod
     def build_ngram_trie(corpus, N):
 
+        if N <= 0:
+            raise IndexError('N must be greater than 0')
         trie = WordTrie()
         for sentence in corpus:
             ngram = ['<s>'] * (N-1)
@@ -25,43 +27,31 @@ class NGramModel:
 
     def __init__(self, train_corpus, N, interp=False, K=1):
         
+        # N is number of words to consider per N-gram
         self.N = N
 
         # can interpolate between models from 1 to N
+        self.interp = interp
         if interp:
             self.lambdas = [1/N for n in range(N)]
             self.tries = [self.build_ngram_trie(train_corpus, n+1) for n in range(N)]
-            unigram = self.tries[0]
+            ugram_trie = self.tries[0]
 
         # or use a single model
         else:
             self.trie = self.build_ngram_trie(train_corpus, N)
-            unigram = self.trie if N == 1 else None
+            ugram_trie = self.trie if N == 1 else None
 
         # unigram can use <UNK> for out-of-vocabulary handling
-        if unigram:
-            unk = WordTrie()
-            for word in unigram.words():
-                count = unigram[word].n
-                if count <= K:
-                    unk.n += count
-                    unigram.pop(word)
-            unigram['<UNK>'] = unk
+        if ugram_trie:
+            for word in ugram_trie.words():
+                if ugram_trie[word].n <= K:
+                    ugram_trie.make_unknown(word)
 
     def MLE(self, ngram):
 
-        curr, parent_n = self.trie, 0
-        for i in range(self.N):
-            word = ngram[i]
-            try:
-                parent_n = curr.n
-                curr = curr[word]
-            except KeyError:
-                if self.N == 1:
-                    curr = curr['<UNK>']
-                else:
-                    return 0
-        return curr.n/parent_n
+        #TODO
+        pass
 
     def perplexity(self, sentence):
 
@@ -77,6 +67,13 @@ class NGramModel:
         except ZeroDivisionError:
             return float('inf')
 
+    def __str__(self):
+
+        if self.interp:
+            return '\n'.join(t.str() for t in self.tries)
+        else:
+            return self.trie.str()
+
 
 class WordTrie:
 
@@ -84,14 +81,14 @@ class WordTrie:
         self.n = 0 # num instances
         self.c = {} # next words
 
-    def __contains__(self, key):
-        return key in self.c
+    def __contains__(self, word):
+        return word in self.c
 
-    def __getitem__(self, key):
-        return self.c[key]
+    def __getitem__(self, word):
+        return self.c[word]
 
-    def __setitem__(self, key, value):
-        self.c[key] = value
+    def __setitem__(self, word, value):
+        self.c[word] = value
 
     def add(self, words):
         self.n += 1
@@ -102,8 +99,22 @@ class WordTrie:
             self[w] = WordTrie()
         self[w].add(words[1:])
 
-    def pop(self, key, default=None):
-        return self.c.pop(key, default)
+    def count(self, words):
+        if not words:
+            return self.n
+        w = words[0]
+        if len(words) == 1:
+            return self[w].n
+        return self[w].count(words[1:])
+
+    def make_unknown(self, word):
+        if '<UNK>' not in self:
+            self['<UNK>'] = WordTrie()
+        if word is not '<UNK>':
+            self['<UNK>'].n += self.pop(word).n
+
+    def pop(self, word, default=None):
+        return self.c.pop(word, default)
 
     def words(self):
         return list(self.c.keys())
@@ -179,10 +190,11 @@ def main(argv=sys.argv):
     elif mode == '3s':
         return 'TODO'
 
-    print(model.trie.str())
+    print(model, file=sys.stderr)
 
     PP = [model.perplexity(s) for s in test_corpus]
-    return '\n'.join(map(str, PP))
+    for i, sentence in enumerate(test_corpus):
+        print(' '.join(sentence) + ' ' + str(PP[i]))
 
 
 if __name__ == '__main__':
