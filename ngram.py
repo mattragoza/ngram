@@ -2,6 +2,7 @@
 
 import sys
 import nltk
+from numpy import log2
 
 
 class UsageError(Exception):
@@ -22,57 +23,68 @@ class NGramModel:
                 ngram.append(word)
                 trie.add(ngram)
                 ngram.pop(0)
-
         return trie
+
+    @staticmethod
+    def ngram_trie_mle(trie, ngram):
+
+        for word in ngram:
+            given_c = trie.n
+            if word in trie:
+                trie = trie[word]
+            elif '<UNK>' in trie:
+                trie = trie['<UNK>']
+            else:
+                return 0
+            curr_c = trie.n
+        return curr_c/given_c
 
     def __init__(self, train_corpus, N, interp=False, K=1):
         
         # N is number of words to consider per N-gram
         self.N = N
 
-        # can interpolate between models from 1 to N
+        # can interpolate between models from N to 1
         self.interp = interp
         if interp:
-            self.lambdas = [1/N for n in range(N)]
-            self.tries = [self.build_ngram_trie(train_corpus, n+1) for n in range(N)]
-            ugram_trie = self.tries[0]
+            self.lambdas = [1/N for i in range(N)]
+            self.tries = [self.build_ngram_trie(train_corpus, N-i) for i in range(N)]
+            ugram_trie = self.tries[-1]
 
         # or use a single model
         else:
-            self.trie = self.build_ngram_trie(train_corpus, N)
-            ugram_trie = self.trie if N == 1 else None
+            self.lambdas = [1]
+            self.tries = [self.build_ngram_trie(train_corpus, N)]
+            ugram_trie = self.tries[0] if N == 1 else None
 
-        # unigram can use <UNK> for out-of-vocabulary handling
+        # unigram model can use <UNK> for out-of-vocabulary handling
         if ugram_trie:
-            for word in ugram_trie.words():
-                if ugram_trie[word].n <= K:
-                    ugram_trie.make_unknown(word)
+            ugram_trie.combine_unknowns(K)
 
-    def MLE(self, ngram):
+    def mle(self, ngram):
 
-        #TODO
-        pass
+        mle = []
+        for i, (lam, trie) in enumerate(zip(self.lambdas, self.tries)):
+            mle.append(lam * self.ngram_trie_mle(trie, ngram[i:]))
+        return sum(mle)
 
     def perplexity(self, sentence):
 
-        mle, s = 1, 0
+        mle_s, len_s = 1, 0
         ngram = ['<s>'] * (self.N-1)
         for word in sentence[1:]:
             ngram.append(word)
-            mle *= self.MLE(ngram)
-            s += 1
+            mle_s *= self.mle(ngram)
+            len_s += 1
             ngram.pop(0)
         try:
-            return mle**(-1/s)
+            return -log2(mle_s)/len_s
         except ZeroDivisionError:
             return float('inf')
 
     def __str__(self):
 
-        if self.interp:
-            return '\n'.join(t.str() for t in self.tries)
-        else:
-            return self.trie.str()
+        return '\n'.join(str(t) for t in self.tries)
 
 
 class WordTrie:
@@ -107,24 +119,31 @@ class WordTrie:
             return self[w].n
         return self[w].count(words[1:])
 
-    def make_unknown(self, word):
-        if '<UNK>' not in self:
-            self['<UNK>'] = WordTrie()
-        if word is not '<UNK>':
-            self['<UNK>'].n += self.pop(word).n
-
-    def pop(self, word, default=None):
-        return self.c.pop(word, default)
+    def combine_unknowns(self, K):
+        for word in self.words():
+            if self[word].n <= K and word is not '<UNK>':
+                if '<UNK>' not in self:
+                    self['<UNK>'] = WordTrie()
+                self['<UNK>'].n += self.c.pop(word).n  
 
     def words(self):
         return list(self.c.keys())
 
-    def str(self, tabs=0):
-        s = 'n=' + str(self.n) + '\n'
+    def __str__(self):
+        return self._str()
+
+    def __repr__(self):
+        return 'WordTrie()'
+
+    def _str(self, tabs=0):
+        tab = '    '
+        s = 'WordTrie(n=' + str(self.n) + ', c={'
+        if self.c: s += '\n'
         for w in self.c:
-            s += '\t'*(tabs+1) + str(w) + ': '
-            s += self.c[w].str(tabs+1)
-        return s
+            s += tab*(tabs+1) + str(w) + ': '
+            s += self.c[w]._str(tabs+1)
+        if self.c: s += tab*tabs
+        return s + '})\n'
 
 
 def read_unprocessed_text_file(text_file):

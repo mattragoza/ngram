@@ -25,12 +25,26 @@ class TestNGramModel(unittest.TestCase):
 
 	def test_build_zerogram_trie(self):
 		with self.assertRaises(IndexError):
-			trie = ngram.NGramModel.build_ngram_trie([], 0)
+			ngram.NGramModel.build_ngram_trie([], 0)
 
-	def test_instantiate_unigram_model(self):
-		model = ngram.NGramModel([], 1)
-		self.assert
+	def test_ngram_trie_mle_known(self):
+		dummy_corpus = ['<s> a b a c a b </s>'.split()]
+		trie = ngram.NGramModel.build_ngram_trie(dummy_corpus, 2)
+		test_ngram = ['a', 'b']
+		self.assertAlmostEqual(ngram.NGramModel.ngram_trie_mle(trie, test_ngram), 2/3)
 
+	def test_ngram_trie_mle_oov(self):
+		dummy_corpus = ['<s> a b a c a d </s>'.split()]
+		trie = ngram.NGramModel.build_ngram_trie(dummy_corpus, 1)
+		test_ngram = ['e']
+		self.assertEqual(ngram.NGramModel.ngram_trie_mle(trie, test_ngram), 0)
+
+	def test_ngram_trie_mle_oov_with_unk(self):
+		dummy_corpus = ['<s> a b a c a d </s>'.split()]
+		trie = ngram.NGramModel.build_ngram_trie(dummy_corpus, 1)
+		trie.combine_unknowns(K=1)
+		test_ngram = ['e']
+		self.assertEqual(ngram.NGramModel.ngram_trie_mle(trie, test_ngram), 4/7)
 
 
 class TestWordTrie(unittest.TestCase):
@@ -79,24 +93,23 @@ class TestWordTrie(unittest.TestCase):
 		trie.add(['word'])
 		self.assertTrue('word' in trie)
 
-	def test_contains_true(self):
+	def test_contains_false(self):
 		trie = ngram.WordTrie()
 		self.assertFalse('word' in trie)
 
-	def test_make_single_word_unknown(self):
-		trie = ngram.WordTrie()
-		trie.add(['word'])
-		trie.make_unknown('word')
-		self.assertTrue('<UNK>' in trie and 'word' not in trie)
-
-	def test_make_multiple_words_unknown(self):
+	def test_combine_unknowns_present(self):
 		trie = ngram.WordTrie()
 		trie.add(['one'])
 		trie.add(['two'])
-		trie.make_unknown('one')
-		trie.make_unknown('two')
-		self.assertEquals(trie.count(['<UNK>']), 2)
+		trie.combine_unknowns(1)
+		self.assertEquals(trie['<UNK>'].n, 2)
 
+	def test_combine_unknowns_absent(self):
+		trie = ngram.WordTrie()
+		trie.add(['one'])
+		trie.add(['one'])
+		trie.combine_unknowns(1)
+		self.assertFalse('<UNK>' in trie)
 
 
 class TestParseArgs(unittest.TestCase):
