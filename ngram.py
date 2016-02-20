@@ -102,6 +102,9 @@ class WordTrie:
     def __setitem__(self, word, value):
         self.c[word] = value
 
+    def keys(self):
+        return list(self.c.keys())
+
     def add(self, words):
         self.n += 1
         if not words: 
@@ -120,14 +123,11 @@ class WordTrie:
         return self[w].count(words[1:])
 
     def combine_unknowns(self, K):
-        for word in self.words():
+        for word in self.keys():
             if self[word].n <= K and word is not '<UNK>':
                 if '<UNK>' not in self:
                     self['<UNK>'] = WordTrie()
                 self['<UNK>'].n += self.c.pop(word).n  
-
-    def words(self):
-        return list(self.c.keys())
 
     def __str__(self):
         return self._str()
