@@ -6,88 +6,68 @@ from numpy import log2
 
 
 class UsageError(Exception):
-    pass
+    def __init__(self, msg):
+        self.msg = msg
 
 
 class NGramModel:
 
-    @staticmethod
-    def build_ngram_trie(corpus, N):
+    def __init__(self, train_corpus, N, interp=False, smooth=False):
 
         if N <= 0:
-            raise IndexError('N must be greater than 0')
-        trie = WordTrie()
-        for sentence in corpus:
-            ngram = ['<s>'] * (N-1)
-            for word in sentence[1:]:
-                ngram.append(word)
-                trie.add(ngram)
-                ngram.pop(0)
-        return trie
-
-    @staticmethod
-    def ngram_trie_mle(trie, ngram):
-
-        for word in ngram:
-            given_c = trie.n
-            if word in trie:
-                trie = trie[word]
-            elif '<UNK>' in trie:
-                trie = trie['<UNK>']
-            else:
-                return 0
-            curr_c = trie.n
-        return curr_c/given_c
-
-    def __init__(self, train_corpus, N, interp=False, K=1):
-        
-        # N is number of words to consider per N-gram
+            raise ValueError('N must be a positive integer')
         self.N = N
 
         # can interpolate between models from N to 1
-        self.interp = interp
         if interp:
-            self.lambdas = [1/N for i in range(N)]
-            self.tries = [self.build_ngram_trie(train_corpus, N-i) for i in range(N)]
-            ugram_trie = self.tries[-1]
+            self.tries = [NGramTrie() for i in range(N)]
+            self.lambdas = [1/N for i in range(N)] # TODO learn lambda parameters
 
         # or use a single model
         else:
+            self.tries = [NGramTrie()]
             self.lambdas = [1]
-            self.tries = [self.build_ngram_trie(train_corpus, N)]
-            ugram_trie = self.tries[0] if N == 1 else None
 
-        # unigram model can use <UNK> for out-of-vocabulary handling
-        if ugram_trie:
-            ugram_trie.combine_unknowns(K)
+        # count ngrams in train corpus by adding to tries
+        for i, trie in enumerate(self.tries):
+            for sentence in train_corpus:
+                for ngram in ngramized(sentence, self.N-i):
+                    trie.add(ngram)
+
+    def train_lambda(self, dev_corpus):
+        pass #TODO
 
     def mle(self, ngram):
-
+        if len(ngram) != self.N:
+            raise ValueError('ngram must be of length ' + str(self.N))
         mle = []
-        for i, (lam, trie) in enumerate(zip(self.lambdas, self.tries)):
-            mle.append(lam * self.ngram_trie_mle(trie, ngram[i:]))
+        for i, trie in enumerate(self.tries):
+            mle.append(self.lambdas[i] * trie.mle(ngram[i:]))
         return sum(mle)
 
-    def perplexity(self, sentence):
+    def entropy(self, sentence):
 
-        mle_s, len_s = 1, 0
-        ngram = ['<s>'] * (self.N-1)
-        for word in sentence[1:]:
-            ngram.append(word)
-            mle_s *= self.mle(ngram)
+        h_s, len_s = 0, 0
+        for ngram in ngramized(sentence, self.N):
+            mle = self.mle(ngram)
+            if mle > 0:
+                h_s += -log2(mle)
+            else:
+                h_s = float('inf')
             len_s += 1
-            ngram.pop(0)
-        try:
-            return -log2(mle_s)/len_s
-        except ZeroDivisionError:
+        if len_s != 0:
+            return h_s/len_s
+        else:
             return float('inf')
 
+    def perplexity(self, sentence):
+        return 2**self.entropy(sentence)
+
     def __str__(self):
+        return '\n'.join(str(trie) for trie in self.tries)
 
-        return '\n'.join(str(t) for t in self.tries)
 
-
-class WordTrie:
+class NGramTrie:
 
     def __init__(self):
         self.n = 0 # num instances
@@ -105,45 +85,78 @@ class WordTrie:
     def keys(self):
         return list(self.c.keys())
 
-    def add(self, words):
+    def add(self, ngram):
         self.n += 1
-        if not words: 
+        if not ngram: 
             return
-        w = words[0]
-        if w not in self:
-            self[w] = WordTrie()
-        self[w].add(words[1:])
+        word = ngram[0]
+        if word not in self:
+            self[word] = NGramTrie()
+        self[word].add(ngram[1:])
 
-    def count(self, words):
-        if not words:
+    def count(self, ngram):
+        if not ngram:
             return self.n
-        w = words[0]
-        if len(words) == 1:
-            return self[w].n
-        return self[w].count(words[1:])
+        word = ngram[0]
+        #if len(ngram) == 1:
+        #    return self[word].n
+        return self[word].count(ngram[1:]) 
 
-    def combine_unknowns(self, K):
-        for word in self.keys():
-            if self[word].n <= K and word is not '<UNK>':
-                if '<UNK>' not in self:
-                    self['<UNK>'] = WordTrie()
-                self['<UNK>'].n += self.c.pop(word).n  
+    def mle(self, ngram):
+        trie = self
+        for word in ngram:
+            given_c = trie.n
+            if word in trie:
+                trie = trie[word]
+            elif '<unk>' in trie:
+                trie = trie['<unk>']
+            else:
+                return 0
+            curr_c = trie.n
+        return curr_c/given_c
 
     def __str__(self):
         return self._str()
 
     def __repr__(self):
-        return 'WordTrie()'
+        return 'NGramTrie()'
 
     def _str(self, tabs=0):
         tab = '    '
-        s = 'WordTrie(n=' + str(self.n) + ', c={'
+        s = 'n=' + str(self.n) + ', c={'
         if self.c: s += '\n'
-        for w in self.c:
-            s += tab*(tabs+1) + str(w) + ': '
-            s += self.c[w]._str(tabs+1)
+        for word in self.c:
+            s += tab*(tabs+1) + '\'' + str(word) + '\': '
+            s += self.c[word]._str(tabs+1)
         if self.c: s += tab*tabs
-        return s + '})\n'
+        return s + '}\n'
+
+
+def ngramized(sentence, N):
+    ngram = ['<s>'] * (N-1)
+    for word in sentence[1:]:
+        ngram.append(word)
+        yield ngram
+        ngram.pop(0)
+
+
+def combine_unknowns(corpus, K=1):
+
+    special = ['<s>', '</s>', '<unk>']
+    counts = {}
+    for sentence in corpus:
+        for word in sentence:
+            if word in counts:
+                counts[word] += 1
+            else:
+                counts[word] = 1
+
+    unk = {w:c for w,c in counts.items() \
+        if c <= K and w not in special}
+    for sentence in corpus:
+        for i, word in enumerate(sentence):
+            if word in unk:
+                sentence[i] = '<unk>'
 
 
 def read_unprocessed_text_file(text_file):
@@ -174,12 +187,12 @@ def read_processed_text_file(text_file):
 
 def parse_args(argv):
 
+    if '-h' in argv:
+        raise UsageError(__doc__)
     if len(argv) < 5:
-        raise UsageError()
-
+        raise UsageError('error: not enough arguments')
     if argv[1] not in ['1', '2', '2s', '3', '3s']:
-        raise UsageError()
-
+        raise UsageError('error: invalid mode argument')
     return argv[1:5]
 
 
@@ -187,33 +200,30 @@ def main(argv=sys.argv):
 
     try:
         mode, train_file, dev_file, test_file = parse_args(argv)
-    except UsageError:
-        return __doc__
+    except UsageError as e:
+        return e.msg
 
     train_corpus = read_unprocessed_text_file(train_file)
     dev_corpus   = read_processed_text_file(dev_file)
     test_corpus  = read_processed_text_file(test_file)
 
+    combine_unknowns(train_corpus, K=1)
+
     if mode == '1':
         model = NGramModel(train_corpus, N=1)
-
     elif mode == '2':
         model = NGramModel(train_corpus, N=2)
-
     elif mode == '2s':
         model = NGramModel(train_corpus, N=2, interp=True)
-
+        model.train_lambda(dev_corpus)
     elif mode == '3':
         model = NGramModel(train_corpus, N=3)
-
     elif mode == '3s':
-        return 'TODO'
-
-    print(model, file=sys.stderr)
+        model = NGramModel(train_corpus, N=3, interp=True, smooth=True)
+        model.train_lambda(dev_corpus)
 
     PP = [model.perplexity(s) for s in test_corpus]
-    for i, sentence in enumerate(test_corpus):
-        print(' '.join(sentence) + ' ' + str(PP[i]))
+    print('\n'.join(map(str, PP)))
 
 
 if __name__ == '__main__':
