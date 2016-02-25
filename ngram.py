@@ -21,8 +21,7 @@ class NGramModel:
         # can interpolate between models from N to 1
         if interp:
             self.tries = [NGramTrie(N-i) for i in range(N)]
-            self.lambdas = np.array([1/N for i in range(N)])
-            self.lambdas /= sum(self.lambdas)
+            self.lambdas = np.ones(N) / N
 
         # or use a single model
         else:
@@ -62,6 +61,9 @@ class NGramModel:
                     l2 = j/10
                     l3 = 1 - (l1 + l2)
                     param_space.append(np.array([l1, l2, l3]))
+
+        else:
+            raise NotImplementedError()
 
         opt_lambdas, opt_pp = self.lambdas, float('inf')
         for lambdas in param_space:
@@ -106,6 +108,7 @@ class NGramModel:
                 except KeyError:
                     wb = 0
                 pr[i] = wb
+            
             else:
                 try:
                     c_next = trie.get(next_).count
@@ -125,10 +128,10 @@ class NGramModel:
             if pr > 0:
                 h_s += -np.log2(pr)
             else:
-                h_s = float('inf')
+                h_s += float('inf')
             len_s += 1
         if len_s != 0:
-            return h_s/len_s
+            return h_s / len_s
         else:
             return float('inf')
 
